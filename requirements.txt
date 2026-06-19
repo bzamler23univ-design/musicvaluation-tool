@@ -1,0 +1,8 @@
+# Core data pipeline
+requests>=2.31
+pandas>=2.0
+pyarrow>=14.0        # parquet output
+
+# Optional fallback strategy (browser automation using YOUR logged-in session).
+# Install the browser binary after pip install:  playwright install chromium
+playwright>=1.43
