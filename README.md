@@ -1,4 +1,107 @@
-# Spotify Global Daily Top 200 — Scraper / Data Pipeline
+# Spotify chart / streaming data pipelines
+
+Two scrapers live in this repo:
+
+| script | source | needs login? | what it gets |
+|--------|--------|--------------|--------------|
+| **`scrape_kworb.py`** *(recommended)* | [kworb.net](https://kworb.net/spotify/) | **no** | Global Daily Top 200, all-time songs, artists |
+| `scrape_spotify_global_200.py` | charts.spotify.com | **yes** | Global Daily Top 200 straight from Spotify |
+
+Spotify shut its open chart CSVs in 2022 and `charts.spotify.com` now requires a
+login (see the second half of this README). **kworb.net republishes the same
+Spotify numbers as plain, login-free HTML tables**, so `scrape_kworb.py` is the
+path of least resistance and is documented first.
+
+> **Hosted-environment note:** both `kworb.net` and `*.spotify.com` are blocked
+> by the Claude Code web/remote container's egress allowlist
+> (`HTTP 403 host_not_allowed`). Run these locally, or in an environment whose
+> network policy allowlists those hosts.
+
+---
+
+# Part A — `scrape_kworb.py` (kworb.net)
+
+Scrapes three datasets into cleaned, validated, **append-only** master files.
+
+| dataset (`--datasets`) | page | output master |
+|---------|------|---------------|
+| `global-daily` | `country/global_daily.html` | `kworb_global_daily.csv` / `.parquet` |
+| `songs` | `songs.html` | `kworb_songs.csv` / `.parquet` |
+| `artists` | `artists.html` | `kworb_artists.csv` / `.parquet` |
+
+Plus `data/processed/kworb_scrape_summary.json` (per-dataset stats + validation),
+and a raw HTML snapshot per run under `data/raw/kworb/<dataset>/`.
+
+### Daily history is built *forward*
+
+kworb's `global_daily.html` only shows the **single most recent day** — it is
+**not** a 2017→today archive. So this scraper **snapshots forward**: each run
+captures the current day (its `chart_date` is read from the page's "Last
+updated" stamp) and appends it to the master, deduped on `chart_date + pos`.
+Run it once per day to accumulate history:
+
+```bash
+# cron: 06:30 UTC daily
+30 6 * * *  cd /path/to/musicvaluation-tool && /path/to/.venv/bin/python scrape_kworb.py >> logs/cron.log 2>&1
+```
+
+`songs` and `artists` are all-time cumulative lists; they're captured as a time
+series keyed by `retrieved_date`, so running daily yields a stream-growth history.
+
+### Install & run
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# All three datasets:
+python scrape_kworb.py --datasets global-daily,songs,artists --verbose
+
+# Just the daily Top 200:
+python scrape_kworb.py --datasets global-daily
+```
+
+| flag | default | meaning |
+|------|---------|---------|
+| `--datasets` | `global-daily,songs,artists` | which datasets to scrape |
+| `--force` | off | overwrite today's raw HTML snapshot if it exists |
+| `--sleep-min` / `--sleep-max` | `1.5` / `4.0` | randomized delay between page fetches |
+| `--max-retries` | `5` | retries per request (exponential backoff + jitter) |
+| `--verbose` | off | verbose console logging |
+
+### Cleaning, schema & validation
+
+Parsing is **generic**: every column in the HTML table is captured under a
+normalized `snake_case` name (known kworb headers like `Pos`, `Artist and
+Title`, `Streams+`, `Total` get friendly names), the combined "Artist and
+Title" cell is split into `artist`/`title`, and Spotify **track/artist IDs are
+extracted from the in-cell links** (with canonical `open.spotify.com` URLs
+derived). This survives kworb adding or renaming a column.
+
+`global-daily` master columns:
+`chart_date, pos, pos_change, artist_and_title, days_on_chart, peak,
+peak_count, streams, streams_change, total_streams, spotify_track_id,
+spotify_artist_id, artist, title, spotify_track_url, spotify_artist_url,
+source_url, retrieved_at`.
+
+Validation (in `kworb_scrape_summary.json`): no duplicate key rows, `pos`
+within 1–200, numeric streams, dates with fewer than 200 rows, and missing-ID
+counts.
+
+### kworb limitations
+
+- **No native daily history** — you only get days you scrape from the day you
+  start (forward-fill). For past dates you'd need an archive (e.g. Wayback) —
+  not implemented here by choice.
+- **kworb is itself a third party** republishing Spotify data; numbers can lag
+  or differ slightly from Spotify's own.
+- **Column drift** — handled generically, but if kworb changes the page layout
+  the friendly-name mapping may need a tweak (`HEADER_ALIASES` in the script).
+- Be polite: keep the randomized delays on and don't hammer the site.
+
+---
+
+# Part B — `scrape_spotify_global_200.py` (charts.spotify.com)
 
 Downloads the Spotify **Global – Daily Top Songs (Top 200)** chart for every
 day in a date range, stores each day's raw CSV, and builds one cleaned,
@@ -187,7 +290,9 @@ Validation (written to `scrape_summary.json`):
 
 ## Legal & ethical note
 
-This tool is for **personal, lawful** data collection.
+These tools are for **personal, lawful** data collection. For `scrape_kworb.py`,
+respect [kworb.net](https://kworb.net)'s terms and `robots.txt`, keep the
+randomized delays on, and don't hammer the site. For the Spotify scraper:
 
 - **Obey Spotify's Terms of Service** and `robots.txt`. You are responsible for
   how you use it.

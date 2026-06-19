@@ -3,6 +3,10 @@ requests>=2.31
 pandas>=2.0
 pyarrow>=14.0        # parquet output
 
+# kworb.net scraper (scrape_kworb.py)
+beautifulsoup4>=4.12
+lxml>=5.0
+
 # Optional fallback strategy (browser automation using YOUR logged-in session).
 # Install the browser binary after pip install:  playwright install chromium
 playwright>=1.43
