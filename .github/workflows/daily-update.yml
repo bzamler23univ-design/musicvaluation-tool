@@ -74,10 +74,19 @@ jobs:
           fi
           rm -f _scrape_ok
 
+      - name: Import any uploaded Spotify CSV exports
+        run: |
+          if compgen -G "data/spotify_csv/*.csv" > /dev/null; then
+            python scripts/import_spotify_csv.py
+          else
+            echo "No Spotify CSVs in data/spotify_csv/."
+          fi
+
       - name: Generate static frontend data (real data, else sample fallback)
         run: |
           if [ ! -f data/processed/kworb_global_daily.csv ] && \
-             [ ! -f data/processed/spotify_global_200_daily.csv ]; then
+             [ ! -f data/processed/spotify_global_200_daily.csv ] && \
+             [ ! -f data/processed/spotify_global_200_weekly.csv ]; then
             echo "No real data yet — generating sample data."
             python scripts/make_sample_data.py
           fi

@@ -18,6 +18,10 @@ data/processed/*
 !data/processed/kworb_songs.csv
 !data/processed/kworb_artists.csv
 !data/processed/kworb_scrape_summary.json
+# Spotify chart CSV exports you download/upload are the source of truth in git;
+# the importer derives the master from them at build time.
+!data/spotify_csv/
+!data/spotify_csv/*.csv
 
 # Logs
 logs/*

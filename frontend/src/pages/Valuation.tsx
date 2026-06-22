@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { fetchSong, fetchSongIndex } from "../lib/api";
+import { fetchSong, fetchSongIndex, fetchSummary } from "../lib/api";
 import type { IndexSong, SongDetail } from "../lib/types";
 import { compactNum, money, pct } from "../lib/format";
 import {
@@ -51,12 +51,16 @@ export default function Valuation() {
   const [song, setSong] = useState<SongDetail | null>(null);
   const [err, setErr] = useState(false);
   const [input, setInput] = useState<ValuationInputs>(DEFAULT_INPUTS);
+  const [periodsPerYear, setPeriodsPerYear] = useState(365);
 
   useEffect(() => {
     fetchSongIndex().then((idx) => {
       setIndex(idx);
       setSongId((cur) => cur ?? idx[0]?.id);
     });
+    fetchSummary()
+      .then((s) => setPeriodsPerYear(s.cadence === "weekly" ? 52 : 365))
+      .catch(() => setPeriodsPerYear(365));
   }, []);
 
   useEffect(() => {
@@ -66,10 +70,13 @@ export default function Valuation() {
     fetchSong(songId).then(setSong).catch(() => setErr(true));
   }, [songId]);
 
-  const result = useMemo(() => (song ? valuate(song.history, input) : null), [song, input]);
+  const result = useMemo(
+    () => (song ? valuate(song.history, input, periodsPerYear) : null),
+    [song, input, periodsPerYear],
+  );
   const grid = useMemo(
-    () => (song ? sensitivity(song.history, input, DISCOUNTS, DECAYS) : null),
-    [song, input],
+    () => (song ? sensitivity(song.history, input, DISCOUNTS, DECAYS, periodsPerYear) : null),
+    [song, input, periodsPerYear],
   );
 
   const setField = (k: keyof ValuationInputs, v: number) =>

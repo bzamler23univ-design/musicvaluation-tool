@@ -51,34 +51,37 @@ def _read_master(name: str) -> Optional[pd.DataFrame]:
     return None
 
 
-def load_normalized() -> tuple[pd.DataFrame, str]:
-    """Return (tidy df, source_label). Columns:
+SPOTIFY_COLS = ["chart_date", "rank", "track_name", "artist_names",
+                "streams", "spotify_track_id"]
+
+
+def load_normalized() -> tuple[pd.DataFrame, str, str]:
+    """Return (tidy df, source_label, cadence). Columns:
     chart_date, rank, track_name, artist_names, streams, spotify_track_id.
+    Cadence is "weekly" or "daily".
     """
-    # Prefer the Spotify-shaped master, then the kworb-shaped one.
+    # Prefer real imported weekly data, then daily, then kworb.
+    weekly = _read_master("spotify_global_200_weekly")
+    if weekly is not None and not weekly.empty:
+        return _clean(weekly[SPOTIFY_COLS].copy()), "spotify_global_200_weekly", "weekly"
+
     spotify = _read_master("spotify_global_200_daily")
     if spotify is not None and not spotify.empty:
-        df = spotify.rename(columns={})
-        df = df[["chart_date", "rank", "track_name", "artist_names",
-                 "streams", "spotify_track_id"]].copy()
-        return _clean(df), "spotify_global_200_daily"
+        return _clean(spotify[SPOTIFY_COLS].copy()), "spotify_global_200_daily", "daily"
 
     kworb = _read_master("kworb_global_daily")
     if kworb is not None and not kworb.empty:
         df = kworb.rename(columns={
             "pos": "rank", "title": "track_name", "artist": "artist_names",
         })
-        # kworb "streams" is the daily figure; keep total_streams if present.
-        keep = ["chart_date", "rank", "track_name", "artist_names",
-                "streams", "spotify_track_id"]
-        for col in keep:
+        for col in SPOTIFY_COLS:
             if col not in df.columns:
                 df[col] = pd.NA
-        return _clean(df[keep]), "kworb_global_daily"
+        return _clean(df[SPOTIFY_COLS]), "kworb_global_daily", "daily"
 
     raise SystemExit(
-        "No processed master found in data/processed/. Run a scraper, or "
-        "`python scripts/make_sample_data.py` for demo data."
+        "No processed master found in data/processed/. Run a scraper, import "
+        "Spotify CSVs, or `python scripts/make_sample_data.py` for demo data."
     )
 
 
@@ -122,20 +125,21 @@ def song_aggregates(df: pd.DataFrame) -> pd.DataFrame:
     return agg
 
 
-def date_health(df: pd.DataFrame) -> dict:
+def date_health(df: pd.DataFrame, step_days: int) -> dict:
+    """Find gaps at the chart's cadence (step_days) and partial (<200) dates."""
     per_day = df.groupby("chart_date").size()
     dates = sorted(per_day.index)
     if not dates:
         return {"missing_dates": [], "partial_dates": []}
-    start = date.fromisoformat(dates[0])
-    end = date.fromisoformat(dates[-1])
-    present = set(dates)
-    missing = []
-    cur = start
-    while cur <= end:
-        if cur.isoformat() not in present:
-            missing.append(cur.isoformat())
-        cur += timedelta(days=1)
+    # Missing = expected interior slots (at the cadence step) with no chart.
+    missing: list[str] = []
+    for prev, cur in zip(dates, dates[1:]):
+        gap = (date.fromisoformat(cur) - date.fromisoformat(prev)).days
+        if gap > step_days * 1.5:  # tolerate minor cadence jitter
+            slot = date.fromisoformat(prev) + timedelta(days=step_days)
+            while slot < date.fromisoformat(cur):
+                missing.append(slot.isoformat())
+                slot += timedelta(days=step_days)
     partial = [{"chart_date": d, "rows": int(per_day[d])}
                for d in dates if per_day[d] < EXPECTED_ROWS]
     return {"missing_dates": missing, "partial_dates": partial}
@@ -152,9 +156,10 @@ def write_json(path: Path, obj) -> None:
 
 
 def build(top_n: int = 100) -> None:
-    df, source = load_normalized()
+    df, source, cadence = load_normalized()
+    step_days = 7 if cadence == "weekly" else 1
     agg = song_aggregates(df)
-    health = date_health(df)
+    health = date_health(df, step_days)
 
     if OUT_DIR.exists():
         shutil.rmtree(OUT_DIR)
@@ -180,6 +185,7 @@ def build(top_n: int = 100) -> None:
     # ---- summary.json ------------------------------------------------------ #
     summary = {
         "source": source,
+        "cadence": cadence,
         "is_sample_data": is_sample,
         "total_songs": int(agg.shape[0]),
         "total_rows": int(df.shape[0]),
@@ -246,6 +252,7 @@ def build(top_n: int = 100) -> None:
     # ---- data_health.json -------------------------------------------------- #
     write_json(OUT_DIR / "data_health.json", {
         "source": source,
+        "cadence": cadence,
         "is_sample_data": is_sample,
         "last_updated": last_updated,
         "date_range": {"start": dates[0], "end": dates[-1]},

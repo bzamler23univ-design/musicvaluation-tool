@@ -46,21 +46,30 @@ export interface ValuationResult {
   impliedMultiple: number; // impliedCatalogValue / currentAnnualOwnerNet
 }
 
-/** Estimate a forward annual stream run-rate from the most recent window. */
-export function recentAnnualStreams(history: HistoryPoint[], windowDays = 90): number {
+/** Estimate a forward annual stream run-rate from the most recent window.
+ * `periodsPerYear` is 365 for daily history or 52 for weekly history. */
+export function recentAnnualStreams(
+  history: HistoryPoint[],
+  periodsPerYear = 365,
+): number {
   if (history.length === 0) return 0;
-  const tail = history.slice(-Math.min(windowDays, history.length));
-  const avgDaily = tail.reduce((s, p) => s + p.streams, 0) / tail.length;
-  return avgDaily * 365;
+  const window = Math.max(1, Math.round(periodsPerYear / 4)); // ~one quarter
+  const tail = history.slice(-Math.min(window, history.length));
+  const avgPerPeriod = tail.reduce((s, p) => s + p.streams, 0) / tail.length;
+  return avgPerPeriod * periodsPerYear;
 }
 
-export function valuate(history: HistoryPoint[], input: ValuationInputs): ValuationResult {
+export function valuate(
+  history: HistoryPoint[],
+  input: ValuationInputs,
+  periodsPerYear = 365,
+): ValuationResult {
   const ownerFactor = input.ownershipPct * input.royaltyShare;
   const historicalStreams = history.reduce((s, p) => s + p.streams, 0);
   const historicalGross = historicalStreams * input.royaltyRatePerStream;
   const ownerNetHistorical = historicalGross * ownerFactor;
 
-  const annual0 = recentAnnualStreams(history);
+  const annual0 = recentAnnualStreams(history, periodsPerYear);
   const projection: ProjectionYear[] = [];
   let projectedGrossTotal = 0;
   let projectedOwnerNetTotal = 0;
@@ -111,11 +120,12 @@ export function sensitivity(
   base: ValuationInputs,
   discountRates: number[],
   decayRates: number[],
+  periodsPerYear = 365,
 ): number[][] {
   return discountRates.map((dr) =>
     decayRates.map(
       (decay) =>
-        valuate(history, { ...base, discountRate: dr, annualDecayRate: decay })
+        valuate(history, { ...base, discountRate: dr, annualDecayRate: decay }, periodsPerYear)
           .impliedCatalogValue,
     ),
   );

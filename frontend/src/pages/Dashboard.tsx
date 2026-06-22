@@ -24,12 +24,14 @@ export default function Dashboard() {
   if (!summary) return <Loading what="dashboard" />;
 
   const dq = summary.num_missing_dates + summary.num_partial_dates;
+  const weekly = summary.cadence === "weekly";
+  const cadenceWord = weekly ? "Weekly" : "Daily";
 
   return (
     <>
       <PageHead
         title="Dashboard"
-        subtitle="Spotify Global Daily Top 200 — dataset overview"
+        subtitle={`Spotify Global ${cadenceWord} Top 200 — dataset overview`}
       />
       <SampleBanner show={summary.is_sample_data} />
 
@@ -40,7 +42,7 @@ export default function Dashboard() {
           value={shortDate(summary.date_range.start)}
           sub={`through ${shortDate(summary.date_range.end)}`}
         />
-        <StatCard label="Chart days" value={summary.num_chart_days.toLocaleString()} sub="distinct dates" />
+        <StatCard label={weekly ? "Chart weeks" : "Chart days"} value={summary.num_chart_days.toLocaleString()} sub={`distinct ${weekly ? "weeks" : "dates"}`} />
         <StatCard
           label="Data gaps"
           value={dq.toLocaleString()}

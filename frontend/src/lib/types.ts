@@ -1,5 +1,6 @@
 export interface Summary {
   source: string;
+  cadence?: "weekly" | "daily";
   is_sample_data: boolean;
   total_songs: number;
   total_rows: number;
