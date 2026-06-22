@@ -9,7 +9,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "claude/lucid-pascal-8v1jqp"]
   workflow_dispatch:
 
 permissions:
