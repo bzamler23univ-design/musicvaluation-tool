@@ -1,6 +1,111 @@
-# Spotify chart / streaming data pipelines
+# 🎵 Music Valuation Tool
 
-Two scrapers live in this repo:
+A full-stack tool for exploring Spotify Global 200 chart data and modelling the
+value of a music catalog.
+
+- **Backend / data pipeline** (`scripts/`) — Python scrapers that collect chart
+  data, plus generators that turn it into static JSON for the web app.
+- **Frontend** (`frontend/`) — a React + Vite + TypeScript single-page app
+  (dark, finance/music-tech aesthetic) with four pages: **Dashboard**,
+  **Song Search**, **Valuation Prototype**, and **Data Health**.
+
+The frontend reads **only static JSON** (`frontend/public/data/`). There is no
+runtime server and **no secrets ever reach the browser** — auth tokens/cookies
+are used only by the Python scrapers.
+
+```
+musicvaluation-tool/
+├── scripts/
+│   ├── scrape_kworb.py                # scraper: kworb.net (no login)
+│   ├── scrape_spotify_global_200.py   # scraper: charts.spotify.com (login)
+│   ├── make_sample_data.py            # synthesize demo data (no network)
+│   └── generate_frontend_data.py      # data/processed/* -> frontend JSON
+├── data/{raw,processed}/   logs/      # pipeline I/O (gitignored)
+├── frontend/                          # React + Vite + TS app
+│   ├── public/data/                   # generated JSON (gitignored)
+│   └── src/{pages,components,lib}/
+├── .github/workflows/                 # CI + GitHub Pages deploy
+└── .env.example
+```
+
+## Quick start (full stack, with demo data)
+
+No scraping needed — synthesize sample data and run the app:
+
+```bash
+# 1. Python deps + sample data
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python scripts/make_sample_data.py          # writes data/processed/*
+python scripts/generate_frontend_data.py    # writes frontend/public/data/*.json
+
+# 2. Frontend
+cd frontend
+npm install
+npm run dev                                  # http://localhost:5173
+```
+
+To use **real** data instead, run a scraper (see Parts A/B below) before
+`generate_frontend_data.py` — it auto-detects the Spotify or kworb master in
+`data/processed/`.
+
+## Generating frontend data
+
+`scripts/generate_frontend_data.py` reads whichever master exists in
+`data/processed/` (`spotify_global_200_daily.*` or `kworb_global_daily.*`) and
+writes:
+
+| file | purpose |
+|------|---------|
+| `summary.json` | dashboard stats (totals, date range, gaps) |
+| `top_songs.json` | top songs by cumulative streams |
+| `song_index.json` | lightweight search index |
+| `songs/<id>.json` | per-song daily stream/rank history |
+| `data_health.json` | missing/partial dates + scraper summary |
+
+## Frontend pages
+
+- **Dashboard** — total songs, date range, chart days, data gaps, top songs.
+- **Song Search** — search by track / artist / Spotify ID; charts for daily
+  streams, rank over time, and cumulative streams; peak rank and days charted.
+- **Valuation Prototype** — pick a song, set assumptions (royalty/stream,
+  ownership %, master/publishing share, annual decay, discount rate, terminal
+  multiple, horizon) → historical gross, owner net, projected revenue,
+  discounted present value, implied catalog value, plus a sensitivity grid.
+  *(Illustrative DCF model, not investment advice.)*
+- **Data Health** — missing dates, partial (<200 row) dates, scraper summary,
+  last-updated timestamp.
+
+## Build, lint & deploy
+
+```bash
+cd frontend
+npm run lint        # eslint
+npm run build       # typecheck (tsc) + vite production build -> frontend/dist
+npm run preview     # serve the production build locally
+```
+
+**GitHub Pages:** the `Deploy to GitHub Pages` workflow builds with sample data
+and publishes `frontend/dist`. Enable it in **Settings → Pages → Source: GitHub
+Actions**, then push to `main`. The Vite `base` is `./` (relative), so it works
+under a project sub-path. Routing uses a hash router, so deep links survive
+refreshes on static hosts.
+
+**Vercel:** set **Root Directory** to `frontend`, build command `npm run build`,
+output `dist`. Add a build step (or commit generated JSON) so
+`frontend/public/data/` is populated — e.g. run the two Python generator scripts
+in a pre-build step.
+
+**CI** (`.github/workflows/ci.yml`) runs on every push/PR: generates sample
+data, lints + builds the frontend, and validates the generated JSON. Scraping is
+**never** scheduled in CI — to automate real scrapes, add a workflow that
+provides your Spotify auth via repository **secrets** (kworb needs none).
+
+---
+
+# Data pipeline (backend)
+
+Two scrapers live in `scripts/`:
 
 | script | source | needs login? | what it gets |
 |--------|--------|--------------|--------------|
@@ -42,7 +147,7 @@ Run it once per day to accumulate history:
 
 ```bash
 # cron: 06:30 UTC daily
-30 6 * * *  cd /path/to/musicvaluation-tool && /path/to/.venv/bin/python scrape_kworb.py >> logs/cron.log 2>&1
+30 6 * * *  cd /path/to/musicvaluation-tool && /path/to/.venv/bin/python scripts/scrape_kworb.py >> logs/cron.log 2>&1
 ```
 
 `songs` and `artists` are all-time cumulative lists; they're captured as a time
@@ -55,10 +160,10 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 # All three datasets:
-python scrape_kworb.py --datasets global-daily,songs,artists --verbose
+python scripts/scrape_kworb.py --datasets global-daily,songs,artists --verbose
 
 # Just the daily Top 200:
-python scrape_kworb.py --datasets global-daily
+python scripts/scrape_kworb.py --datasets global-daily
 ```
 
 | flag | default | meaning |
@@ -203,14 +308,14 @@ export SPOTIFY_CHARTS_COOKIE="sp_dc=...; sp_t=..."
 **Or** skip tokens entirely and use the browser fallback. Log in once:
 
 ```bash
-python scrape_spotify_global_200.py --playwright-login
+python scripts/scrape_spotify_global_200.py --playwright-login
 # A browser opens -> log into Spotify -> press Enter -> session saved to playwright_state.json
 ```
 
 ## 3. Run a small test scrape (7 days)
 
 ```bash
-python scrape_spotify_global_200.py \
+python scripts/scrape_spotify_global_200.py \
   --start-date 2023-01-01 --end-date 2023-01-07 --verbose
 ```
 
@@ -218,7 +323,7 @@ python scrape_spotify_global_200.py \
 
 ```bash
 # Find the true earliest reachable date, then scrape through today:
-python scrape_spotify_global_200.py --detect-earliest \
+python scripts/scrape_spotify_global_200.py --detect-earliest \
   --start-date 2017-01-01 --end-date $(date +%F)
 ```
 

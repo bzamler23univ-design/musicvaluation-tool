@@ -16,6 +16,21 @@ data/processed/*
 logs/*
 !logs/.gitkeep
 
-# Secrets / sessions — NEVER commit your Spotify auth
+# Secrets / sessions — NEVER commit your Spotify auth, cookies, or tokens
 playwright_state.json
 .env
+.env.*
+!.env.example
+*.cookies
+*.token
+cookies.txt
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# Generated static data for the frontend (regenerate with generate_frontend_data.py)
+frontend/public/data/*
+!frontend/public/data/.gitkeep

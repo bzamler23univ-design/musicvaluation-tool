@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  frontend:
+    name: Lint & build frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Generate sample static data so the build has something to bundle.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pandas pyarrow
+      - name: Generate sample frontend data
+        run: |
+          python scripts/make_sample_data.py
+          python scripts/generate_frontend_data.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run lint
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+
+  data-validation:
+    name: Validate data pipeline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pandas pyarrow
+      - name: Build sample data + frontend JSON
+        run: |
+          python scripts/make_sample_data.py
+          python scripts/generate_frontend_data.py
+      - name: Validate generated JSON
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+          base = pathlib.Path("frontend/public/data")
+          required = ["summary.json", "top_songs.json", "song_index.json", "data_health.json"]
+          for f in required:
+              p = base / f
+              assert p.exists(), f"missing {f}"
+              json.loads(p.read_text())
+          summary = json.loads((base / "summary.json").read_text())
+          assert summary["total_songs"] > 0, "no songs in summary"
+          assert summary["num_chart_days"] > 0, "no chart days"
+          songs = list((base / "songs").glob("*.json"))
+          assert len(songs) == summary["total_songs"], "song file count mismatch"
+          # spot-check a per-song file schema
+          one = json.loads(songs[0].read_text())
+          for key in ("id", "track_name", "peak_rank", "days_charted", "history"):
+              assert key in one, f"song file missing {key}"
+          print(f"OK: {summary['total_songs']} songs, {summary['num_chart_days']} days")
+          PY

@@ -1,0 +1,59 @@
+name: Deploy to GitHub Pages
+
+# Builds the frontend with sample data and publishes it to GitHub Pages.
+# Enable: repo Settings → Pages → Build and deployment → Source: GitHub Actions.
+#
+# NOTE: this does NOT scrape Spotify/kworb. It deploys with synthetic sample
+# data so the demo works without secrets. To publish real data, generate it
+# (locally or in a job that has your secrets) before the build step.
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pandas pyarrow
+      - name: Generate static data
+        run: |
+          python scripts/make_sample_data.py
+          python scripts/generate_frontend_data.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

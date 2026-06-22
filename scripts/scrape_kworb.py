@@ -56,7 +56,7 @@ from bs4 import BeautifulSoup
 # Configuration
 # --------------------------------------------------------------------------- #
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent  # repo root (scripts/ -> ..)
 RAW_DIR = PROJECT_ROOT / "data" / "raw" / "kworb"
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 LOG_DIR = PROJECT_ROOT / "logs"
