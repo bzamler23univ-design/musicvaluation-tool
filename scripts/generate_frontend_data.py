@@ -159,6 +159,8 @@ def build(top_n: int = 100) -> None:
     if OUT_DIR.exists():
         shutil.rmtree(OUT_DIR)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    # Keep the tracked placeholder so the (gitignored) data dir survives in git.
+    (OUT_DIR / ".gitkeep").touch()
 
     dates = sorted(df["chart_date"].unique())
     last_updated = datetime.now(timezone.utc).isoformat()
