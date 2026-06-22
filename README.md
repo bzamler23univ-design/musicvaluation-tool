@@ -62,6 +62,32 @@ writes:
 | `song_index.json` | lightweight search index |
 | `songs/<id>.json` | per-song daily stream/rank history |
 | `data_health.json` | missing/partial dates + scraper summary |
+| `songs_alltime.json` / `artists_alltime.json` | all-time lists for the Charts page |
+
+It auto-detects the data source, preferring (1) imported Spotify **weekly**
+data, then (2) Spotify **daily**, then (3) kworb. The chart **cadence** (weekly
+vs daily) is detected and drives gap detection and the valuation's annualization.
+
+## Importing official Spotify chart CSVs (real history)
+
+The live scraper only accumulates data going forward. To load **history**, use
+the CSV exports from [charts.spotify.com](https://charts.spotify.com) (the
+"Download data as CSV" button — pick *Weekly* and a date, weekly is easiest):
+
+```bash
+# 1. Put the downloaded CSV(s) in data/spotify_csv/ (tracked in git), then:
+python scripts/import_spotify_csv.py            # imports data/spotify_csv/*.csv
+python scripts/generate_frontend_data.py        # rebuild the site data
+```
+
+- The chart date is read from the filename's trailing `YYYYMMDD`
+  (e.g. `...weekly20260618.csv` → 2026-06-18); override with `--date`.
+- Weekly vs daily is read from the filename; override with `--cadence`.
+- Each week is deduped on `(chart_date, rank)`, so re-importing is safe.
+
+**Via GitHub (no local setup):** upload a CSV into `data/spotify_csv/` using
+GitHub's *Add file → Upload files*. The deploy workflow imports it and rebuilds
+the site automatically. Download one CSV per week to grow the history.
 
 ## Frontend pages
 
