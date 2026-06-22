@@ -1,0 +1,101 @@
+name: Daily update & deploy
+
+# Once a day: scrape kworb.net, commit the updated chart masters (so history
+# accumulates across runs), regenerate the static JSON, build the frontend, and
+# deploy it to GitHub Pages. kworb is public — NO secrets required.
+#
+# Scrape + deploy live in one job because pushes made with GITHUB_TOKEN do not
+# trigger other workflows, so we can't rely on a data commit to fire the deploy.
+
+on:
+  schedule:
+    - cron: "30 7 * * *" # 07:30 UTC daily (after kworb's overnight update)
+  workflow_dispatch:
+
+permissions:
+  contents: write # commit refreshed data
+  pages: write # deploy to Pages
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests beautifulsoup4 lxml pandas pyarrow
+
+      - name: Scrape kworb (global daily, songs, artists)
+        continue-on-error: true
+        run: |
+          python scripts/scrape_kworb.py \
+            --datasets global-daily,songs,artists \
+            --sleep-min 2 --sleep-max 5 --verbose
+
+      - name: Commit refreshed data (if the latest chart looks valid)
+        run: |
+          python - <<'PY'
+          import pathlib, pandas as pd
+          p = pathlib.Path("data/processed/kworb_global_daily.csv")
+          ok = False
+          if p.exists():
+              df = pd.read_csv(p)
+              latest = df["chart_date"].max()
+              n = int((df["chart_date"] == latest).sum())
+              print(f"latest={latest} rows={n} total={len(df)}")
+              ok = n >= 100
+          pathlib.Path("_scrape_ok").write_text("1" if ok else "0")
+          PY
+          if [ "$(cat _scrape_ok)" = "1" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add data/processed/kworb_global_daily.csv \
+                    data/processed/kworb_songs.csv \
+                    data/processed/kworb_artists.csv \
+                    data/processed/kworb_scrape_summary.json 2>/dev/null || true
+            if git diff --cached --quiet; then
+              echo "No data changes to commit."
+            else
+              git commit -m "data: daily kworb chart update"
+              git push
+            fi
+          else
+            echo "::warning::Scrape produced no valid chart; keeping previous data."
+          fi
+          rm -f _scrape_ok
+
+      - name: Generate static frontend data (real data, else sample fallback)
+        run: |
+          if [ ! -f data/processed/kworb_global_daily.csv ] && \
+             [ ! -f data/processed/spotify_global_200_daily.csv ]; then
+            echo "No real data yet — generating sample data."
+            python scripts/make_sample_data.py
+          fi
+          python scripts/generate_frontend_data.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist
+      - id: deployment
+        uses: actions/deploy-pages@v4

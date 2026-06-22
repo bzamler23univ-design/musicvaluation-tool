@@ -10,13 +10,14 @@ export interface ValuationInputs {
   projectionYears: number; // integer
 }
 
+// Defaults are set to data-backed midpoints — see src/lib/benchmarks.ts.
 export const DEFAULT_INPUTS: ValuationInputs = {
-  royaltyRatePerStream: 0.004,
+  royaltyRatePerStream: 0.004, // $0.003–0.005 avg Spotify payout
   ownershipPct: 1.0,
-  royaltyShare: 0.5,
-  annualDecayRate: 0.2,
-  discountRate: 0.1,
-  terminalMultiple: 3,
+  royaltyShare: 0.8, // ~80% recording (master) side of the 80/20 split
+  annualDecayRate: 0.15, // ~19% early decay, plateauing
+  discountRate: 0.09, // Hipgnosis used 8.5%
+  terminalMultiple: 4, // applied to final-year net (years 11+)
   projectionYears: 10,
 };
 
@@ -41,6 +42,8 @@ export interface ValuationResult {
   terminalValue: number;
   pvTerminal: number;
   impliedCatalogValue: number;
+  currentAnnualOwnerNet: number; // forward annual owner net at the run-rate
+  impliedMultiple: number; // impliedCatalogValue / currentAnnualOwnerNet
 }
 
 /** Estimate a forward annual stream run-rate from the most recent window. */
@@ -81,6 +84,10 @@ export function valuate(history: HistoryPoint[], input: ValuationInputs): Valuat
   const pvTerminal = terminalValue * last.discountFactor;
   const impliedCatalogValue = pvProjected + pvTerminal;
 
+  const currentAnnualOwnerNet = annual0 * input.royaltyRatePerStream * ownerFactor;
+  const impliedMultiple =
+    currentAnnualOwnerNet > 0 ? impliedCatalogValue / currentAnnualOwnerNet : 0;
+
   return {
     historicalStreams,
     historicalGross,
@@ -93,6 +100,8 @@ export function valuate(history: HistoryPoint[], input: ValuationInputs): Valuat
     terminalValue,
     pvTerminal,
     impliedCatalogValue,
+    currentAnnualOwnerNet,
+    impliedMultiple,
   };
 }
 

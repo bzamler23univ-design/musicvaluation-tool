@@ -18,6 +18,7 @@ import {
   valuate,
   type ValuationInputs,
 } from "../lib/valuation";
+import { BENCHMARKS, SOURCES } from "../lib/benchmarks";
 import { Card, Empty, Loading, PageHead } from "../components/ui";
 
 interface FieldDef {
@@ -130,6 +131,11 @@ export default function Valuation() {
               <div className="hint">
                 {f.hint}
                 {f.asPct ? ` · ${pct(input[f.key])}` : ""}
+                {BENCHMARKS[f.key] && (
+                  <span title={BENCHMARKS[f.key].detail} style={{ color: "var(--accent)" }}>
+                    {" "}· mkt {BENCHMARKS[f.key].text}
+                  </span>
+                )}
               </div>
             </div>
           ))}
@@ -167,6 +173,24 @@ export default function Valuation() {
             <div className="kpi">
               <div className="l">PV of terminal value</div>
               <div className="v">{money(result.pvTerminal)}</div>
+            </div>
+            <div className="kpi">
+              <div className="l">
+                Implied multiple{" "}
+                <span
+                  title={BENCHMARKS.marketMultiple.detail}
+                  style={{
+                    color:
+                      result.impliedMultiple >= BENCHMARKS.marketMultiple.low &&
+                      result.impliedMultiple <= BENCHMARKS.marketMultiple.high
+                        ? "var(--accent)"
+                        : "var(--amber)",
+                  }}
+                >
+                  (mkt {BENCHMARKS.marketMultiple.text})
+                </span>
+              </div>
+              <div className="v">{result.impliedMultiple.toFixed(1)}×</div>
             </div>
           </div>
 
@@ -259,6 +283,39 @@ export default function Valuation() {
               estimated from the trailing 90-day run-rate, decayed annually; the terminal value applies
               your multiple to final-year owner net, discounted to present value.
             </p>
+          </Card>
+
+          <div className="spacer-lg" />
+          <Card title="Benchmarks & sources backing these assumptions">
+            <div className="table-wrap">
+              <table className="t">
+                <thead>
+                  <tr>
+                    <th>Assumption</th>
+                    <th>Market benchmark</th>
+                    <th>Supporting data</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(BENCHMARKS).map(([key, b]) => (
+                    <tr key={key} style={{ cursor: "default" }}>
+                      <td style={{ fontWeight: 600, textTransform: "capitalize" }}>
+                        {key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase())}
+                      </td>
+                      <td style={{ color: "var(--accent)", whiteSpace: "nowrap" }}>{b.text}</td>
+                      <td className="muted" style={{ fontSize: 13 }}>{b.detail}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="chips" style={{ marginTop: 14 }}>
+              {SOURCES.map((s) => (
+                <a key={s.id} className="chip" href={s.url} target="_blank" rel="noreferrer">
+                  {s.publisher}: {s.title} ↗
+                </a>
+              ))}
+            </div>
           </Card>
         </>
       )}

@@ -11,6 +11,13 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+# ...but DO persist the cleaned kworb chart masters (CSV only) so the daily
+# GitHub Action can accumulate history across runs and the live site has data.
+# Parquet is kept local to avoid binary churn; CSV is the source of truth in git.
+!data/processed/kworb_global_daily.csv
+!data/processed/kworb_songs.csv
+!data/processed/kworb_artists.csv
+!data/processed/kworb_scrape_summary.json
 
 # Logs
 logs/*

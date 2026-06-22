@@ -30,9 +30,13 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install pandas pyarrow
-      - name: Generate static data
+      - name: Generate static data (committed real data, else sample fallback)
         run: |
-          python scripts/make_sample_data.py
+          if [ ! -f data/processed/kworb_global_daily.csv ] && \
+             [ ! -f data/processed/spotify_global_200_daily.csv ]; then
+            echo "No real data committed yet — using sample data."
+            python scripts/make_sample_data.py
+          fi
           python scripts/generate_frontend_data.py
       - uses: actions/setup-node@v4
         with:
