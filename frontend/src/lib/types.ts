@@ -43,6 +43,30 @@ export interface SongDetail {
   history: HistoryPoint[];
 }
 
+export interface AllTimeSong {
+  rank: number;
+  track_name: string;
+  artist_names: string;
+  total_streams: number | null;
+  daily_streams: number | null;
+  spotify_track_id: string | null;
+}
+
+export interface AllTimeArtist {
+  rank: number;
+  artist_names: string;
+  total_streams: number | null;
+  daily_streams: number | null;
+  spotify_artist_id: string | null;
+  songs?: number;
+  peak_rank?: number;
+}
+
+export interface AllTimeFile<T> {
+  source: string;
+  rows: T[];
+}
+
 export interface DataHealth {
   source: string;
   is_sample_data: boolean;

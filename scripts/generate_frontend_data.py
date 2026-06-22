@@ -255,8 +255,89 @@ def build(top_n: int = 100) -> None:
         "scraper_summary": scraper_summary,
     })
 
+    # ---- all-time songs & artists lists ------------------------------------ #
+    songs_alltime, songs_origin = build_alltime_songs(agg)
+    write_json(OUT_DIR / "songs_alltime.json", {"source": songs_origin, "rows": songs_alltime})
+    artists_alltime, artists_origin = build_alltime_artists(df)
+    write_json(OUT_DIR / "artists_alltime.json", {"source": artists_origin, "rows": artists_alltime})
+
     print(f"Generated frontend data from '{source}': {agg.shape[0]} songs, "
-          f"{len(dates)} days -> {OUT_DIR}")
+          f"{len(dates)} days, {len(artists_alltime)} artists -> {OUT_DIR}")
+
+
+def build_alltime_songs(agg: pd.DataFrame, top_n: int = 200) -> tuple[list, str]:
+    """Prefer kworb's all-time songs list; else derive from the chart master."""
+    kworb = _read_master("kworb_songs")
+    if kworb is not None and not kworb.empty:
+        latest = kworb[kworb["retrieved_date"] == kworb["retrieved_date"].max()]
+        rows = []
+        for r in latest.itertuples():
+            rows.append({
+                "rank": int(getattr(r, "rank", 0) or 0),
+                "track_name": getattr(r, "title", None) or getattr(r, "artist_and_title", ""),
+                "artist_names": getattr(r, "artist", "") or "",
+                "total_streams": _int(getattr(r, "streams", None)),
+                "daily_streams": _int(getattr(r, "daily_streams", None)),
+                "spotify_track_id": _str(getattr(r, "spotify_track_id", None)),
+            })
+        return rows[:top_n], "kworb_songs"
+    # Derived fallback: cumulative streams from the daily chart.
+    top = agg.sort_values("cumulative_streams", ascending=False).head(top_n)
+    rows = [{
+        "rank": i + 1,
+        "track_name": r.track_name,
+        "artist_names": r.artist_names,
+        "total_streams": int(r.cumulative_streams),
+        "daily_streams": None,
+        "spotify_track_id": r.spotify_track_id if isinstance(r.spotify_track_id, str) else None,
+    } for i, r in enumerate(top.itertuples())]
+    return rows, "derived_from_chart"
+
+
+def build_alltime_artists(df: pd.DataFrame, top_n: int = 200) -> tuple[list, str]:
+    """Prefer kworb's artists list; else derive by aggregating the chart master."""
+    kworb = _read_master("kworb_artists")
+    if kworb is not None and not kworb.empty:
+        latest = kworb[kworb["retrieved_date"] == kworb["retrieved_date"].max()]
+        rows = []
+        for r in latest.itertuples():
+            rows.append({
+                "rank": int(getattr(r, "rank", 0) or 0),
+                "artist_names": getattr(r, "artist", "") or "",
+                "total_streams": _int(getattr(r, "streams", None)),
+                "daily_streams": _int(getattr(r, "daily_streams", None)),
+                "spotify_artist_id": _str(getattr(r, "spotify_artist_id", None)),
+            })
+        return rows[:top_n], "kworb_artists"
+    # Derived fallback: aggregate chart streams by artist.
+    g = df.groupby("artist_names").agg(
+        total_streams=("streams", "sum"),
+        songs=("song_id", "nunique"),
+        peak_rank=("rank", "min"),
+    ).reset_index().sort_values("total_streams", ascending=False).head(top_n)
+    rows = [{
+        "rank": i + 1,
+        "artist_names": r.artist_names,
+        "total_streams": int(r.total_streams),
+        "songs": int(r.songs),
+        "peak_rank": int(r.peak_rank),
+        "daily_streams": None,
+        "spotify_artist_id": None,
+    } for i, r in enumerate(g.itertuples())]
+    return rows, "derived_from_chart"
+
+
+def _int(v) -> Optional[int]:
+    try:
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return None
+        return int(v)
+    except (ValueError, TypeError):
+        return None
+
+
+def _str(v) -> Optional[str]:
+    return v if isinstance(v, str) and v.strip() and v.lower() != "nan" else None
 
 
 def main() -> None:

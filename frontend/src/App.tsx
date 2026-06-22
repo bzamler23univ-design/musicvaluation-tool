@@ -1,6 +1,7 @@
 import { Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import Dashboard from "./pages/Dashboard";
+import Charts from "./pages/Charts";
 import SongSearch from "./pages/SongSearch";
 import Valuation from "./pages/Valuation";
 import DataHealthPage from "./pages/DataHealth";
@@ -10,6 +11,7 @@ export default function App() {
     <Layout>
       <Routes>
         <Route path="/" element={<Dashboard />} />
+        <Route path="/charts" element={<Charts />} />
         <Route path="/search" element={<SongSearch />} />
         <Route path="/search/:id" element={<SongSearch />} />
         <Route path="/valuation" element={<Valuation />} />

@@ -159,20 +159,34 @@ series keyed by `retrieved_date`, so running daily yields a stream-growth histor
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# All three datasets:
+# All three core datasets:
 python scripts/scrape_kworb.py --datasets global-daily,songs,artists --verbose
 
 # Just the daily Top 200:
 python scripts/scrape_kworb.py --datasets global-daily
+
+# Per-country daily Top 200 (writes kworb_country_<cc>.csv):
+python scripts/scrape_kworb.py --countries us,gb,de
+
+# A specific artist's full song + album catalog (kworb_artist_<id>_songs/_albums.csv):
+python scripts/scrape_kworb.py --artists 3TVXtAsR1Inumwj472S9r4   # Drake
 ```
 
 | flag | default | meaning |
 |------|---------|---------|
-| `--datasets` | `global-daily,songs,artists` | which datasets to scrape |
+| `--datasets` | `global-daily,songs,artists` | named datasets to scrape |
+| `--countries` | _(none)_ | ISO codes for per-country daily charts, e.g. `us,gb,de` |
+| `--artists` | _(none)_ | Spotify artist IDs → full song + album catalogs |
 | `--force` | off | overwrite today's raw HTML snapshot if it exists |
 | `--sleep-min` / `--sleep-max` | `1.5` / `4.0` | randomized delay between page fetches |
 | `--max-retries` | `5` | retries per request (exponential backoff + jitter) |
 | `--verbose` | off | verbose console logging |
+
+The website's **Charts** page shows the all-time **Songs** and **Artists** lists
+(from `songs.html` / `artists.html`); if those haven't been scraped it falls
+back to lists derived from the daily chart. To have the daily GitHub Action also
+pull per-country charts, add `--countries ...` to the scrape step in
+`.github/workflows/daily-update.yml`.
 
 ### Cleaning, schema & validation
 

@@ -1,4 +1,7 @@
 import type {
+  AllTimeArtist,
+  AllTimeFile,
+  AllTimeSong,
   DataHealth,
   IndexSong,
   SongDetail,
@@ -22,3 +25,7 @@ export const fetchSongIndex = () => getJSON<IndexSong[]>("song_index.json");
 export const fetchDataHealth = () => getJSON<DataHealth>("data_health.json");
 export const fetchSong = (id: string) =>
   getJSON<SongDetail>(`songs/${encodeURIComponent(id)}.json`);
+export const fetchSongsAllTime = () =>
+  getJSON<AllTimeFile<AllTimeSong>>("songs_alltime.json");
+export const fetchArtistsAllTime = () =>
+  getJSON<AllTimeFile<AllTimeArtist>>("artists_alltime.json");

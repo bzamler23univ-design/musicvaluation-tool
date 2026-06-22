@@ -63,23 +63,40 @@ LOG_DIR = PROJECT_ROOT / "logs"
 
 BASE = "https://kworb.net/spotify"
 
-DATASETS = {
-    "global-daily": {
-        "url": f"{BASE}/country/global_daily.html",
-        "history_key": ["chart_date", "pos"],
-        "date_field": "chart_date",
-    },
-    "songs": {
-        "url": f"{BASE}/songs.html",
-        "history_key": ["retrieved_date", "rank"],
-        "date_field": "retrieved_date",
-    },
-    "artists": {
-        "url": f"{BASE}/artists.html",
-        "history_key": ["retrieved_date", "rank"],
-        "date_field": "retrieved_date",
-    },
+# Built-in named datasets. "kind" drives how rows are stamped/validated:
+#   daily   -> a dated Top-200 chart (chart_date + pos)
+#   alltime -> a cumulative list captured as a retrieved_date time series
+BUILTIN_DATASETS = {
+    "global-daily": {"url": f"{BASE}/country/global_daily.html", "kind": "daily"},
+    "songs": {"url": f"{BASE}/songs.html", "kind": "alltime"},
+    "artists": {"url": f"{BASE}/artists.html", "kind": "alltime"},
 }
+
+
+def _finish_cfg(cfg: dict) -> dict:
+    if cfg["kind"] == "daily":
+        cfg["history_key"] = ["chart_date", "pos"]
+        cfg["date_field"] = "chart_date"
+    else:
+        cfg["history_key"] = ["retrieved_date", "rank"]
+        cfg["date_field"] = "retrieved_date"
+    return cfg
+
+
+def dataset_config(name: str) -> Optional[dict]:
+    """Resolve a dataset name to a config. Supports built-ins plus dynamic
+    ``country-<cc>`` (e.g. country-us) daily charts."""
+    if name in BUILTIN_DATASETS:
+        return _finish_cfg(dict(BUILTIN_DATASETS[name]))
+    if name.startswith("country-"):
+        cc = name.split("-", 1)[1].lower()
+        return _finish_cfg({"url": f"{BASE}/country/{cc}_daily.html", "kind": "daily"})
+    return None
+
+
+def artist_config(artist_id: str, page: str) -> dict:
+    """Config for a per-artist catalog page: page is 'songs' or 'albums'."""
+    return _finish_cfg({"url": f"{BASE}/artist/{artist_id}_{page}.html", "kind": "alltime"})
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -328,12 +345,12 @@ def parse_kworb_table(html: str, source_url: str) -> tuple[pd.DataFrame, Optiona
 
 
 def normalize_dataset(
-    dataset: str, df: pd.DataFrame, *, source_url: str, last_updated: Optional[str], retrieved_at: str
+    kind: str, df: pd.DataFrame, *, source_url: str, last_updated: Optional[str], retrieved_at: str
 ) -> pd.DataFrame:
     df = df.copy()
     retrieved_date = retrieved_at[:10]
 
-    if dataset == "global-daily":
+    if kind == "daily":
         # kworb's daily page represents the day in its "last updated" stamp.
         df.insert(0, "chart_date", last_updated or retrieved_date)
         if "pos" not in df.columns:
@@ -392,13 +409,13 @@ def append_master(dataset: str, new_df: pd.DataFrame, key: list[str]) -> pd.Data
 # --------------------------------------------------------------------------- #
 
 
-def validate(dataset: str, df: pd.DataFrame, key: list[str]) -> dict:
+def validate(kind: str, df: pd.DataFrame, key: list[str]) -> dict:
     report: dict = {"rows": int(len(df))}
     key = [k for k in key if k in df.columns]
     if key:
         report["duplicate_key_rows"] = int(df.duplicated(subset=key).sum())
 
-    if dataset == "global-daily":
+    if kind == "daily":
         if "pos" in df.columns:
             pos = pd.to_numeric(df["pos"], errors="coerce")
             report["pos_out_of_range_1_200"] = int(((pos < 1) | (pos > 200)).sum())
@@ -410,14 +427,18 @@ def validate(dataset: str, df: pd.DataFrame, key: list[str]) -> dict:
         report["missing_track_id"] = int(df["spotify_track_id"].isna().sum()) \
             if "spotify_track_id" in df.columns else None
     else:
-        date_col = "retrieved_date"
-        if date_col in df.columns:
-            report["distinct_dates"] = int(df[date_col].nunique())
-        id_col = "spotify_artist_id" if dataset == "artists" else "spotify_track_id"
+        if "retrieved_date" in df.columns:
+            report["distinct_dates"] = int(df["retrieved_date"].nunique())
+        # Prefer artist id when the list has no track ids (e.g. artists page).
+        id_col = "spotify_track_id"
+        if "spotify_track_id" in df.columns and df["spotify_track_id"].notna().any():
+            id_col = "spotify_track_id"
+        elif "spotify_artist_id" in df.columns:
+            id_col = "spotify_artist_id"
         if id_col in df.columns:
             report["missing_spotify_id"] = int(df[id_col].isna().sum())
 
-    streams_col = "streams" if dataset == "global-daily" else "total_streams"
+    streams_col = "streams" if kind == "daily" else "total_streams"
     if streams_col in df.columns:
         report["streams_non_numeric"] = int(pd.to_numeric(df[streams_col], errors="coerce").isna().sum())
 
@@ -438,9 +459,8 @@ class RunStats:
 
 
 def run_dataset(
-    session: requests.Session, dataset: str, *, force: bool, max_retries: int
+    session: requests.Session, dataset: str, cfg: dict, *, force: bool, max_retries: int
 ) -> dict:
-    cfg = DATASETS[dataset]
     url = cfg["url"]
     raw_subdir = RAW_DIR / dataset.replace("-", "_")
     raw_subdir.mkdir(parents=True, exist_ok=True)
@@ -451,7 +471,7 @@ def run_dataset(
     df, last_updated = parse_kworb_table(html, url)
 
     norm = normalize_dataset(
-        dataset, df, source_url=url, last_updated=last_updated, retrieved_at=retrieved_at
+        cfg["kind"], df, source_url=url, last_updated=last_updated, retrieved_at=retrieved_at
     )
 
     # Determine the snapshot date used for the raw filename + resume check.
@@ -468,7 +488,7 @@ def run_dataset(
         logger.info("[%s] saved raw snapshot -> %s", dataset, raw_path.name)
 
     master = append_master(dataset, norm, cfg["history_key"])
-    report = validate(dataset, master, cfg["history_key"])
+    report = validate(cfg["kind"], master, cfg["history_key"])
     report.update({
         "url": url,
         "snapshot_date": snap_date,
@@ -494,7 +514,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--datasets",
         default="global-daily,songs,artists",
-        help="Comma-separated datasets to scrape (choices: global-daily, songs, artists).",
+        help="Comma-separated datasets (choices: global-daily, songs, artists).",
+    )
+    p.add_argument(
+        "--countries",
+        default="",
+        help="Comma-separated ISO country codes for per-country daily Top 200 "
+        "(e.g. us,gb,de). Scrapes kworb /country/<cc>_daily.html.",
+    )
+    p.add_argument(
+        "--artists",
+        default="",
+        help="Comma-separated Spotify artist IDs to pull full song + album "
+        "catalogs (kworb /artist/<id>_songs.html and _albums.html).",
     )
     p.add_argument("--force", action="store_true",
                    help="Overwrite today's raw snapshot if it already exists.")
@@ -514,13 +546,27 @@ def main(argv: Optional[list[str]] = None) -> int:
     for d in (RAW_DIR, PROCESSED_DIR, LOG_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
-    datasets = [d.strip() for d in args.datasets.split(",") if d.strip()]
-    bad = set(datasets) - set(DATASETS)
-    if bad:
-        logger.error("Unknown datasets: %s (valid: %s)", bad, list(DATASETS))
-        return 2
     if args.sleep_min > args.sleep_max:
         logger.error("--sleep-min cannot exceed --sleep-max")
+        return 2
+
+    # Build the ordered list of (name, cfg) tasks from the three sources.
+    tasks: list[tuple[str, dict]] = []
+    for name in (d.strip() for d in args.datasets.split(",") if d.strip()):
+        cfg = dataset_config(name)
+        if cfg is None:
+            logger.error("Unknown dataset: %s (valid: %s)", name, list(BUILTIN_DATASETS))
+            return 2
+        tasks.append((name, cfg))
+    for cc in (c.strip().lower() for c in args.countries.split(",") if c.strip()):
+        name = f"country-{cc}"
+        tasks.append((name, dataset_config(name)))  # type: ignore[arg-type]
+    for aid in (a.strip() for a in args.artists.split(",") if a.strip()):
+        for page in ("songs", "albums"):
+            tasks.append((f"artist-{aid}-{page}", artist_config(aid, page)))
+
+    if not tasks:
+        logger.error("Nothing to scrape. Use --datasets, --countries, or --artists.")
         return 2
 
     session = requests.Session()
@@ -528,16 +574,16 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     stats = RunStats()
     any_ok = False
-    for i, dataset in enumerate(datasets):
+    for i, (dataset, cfg) in enumerate(tasks):
         try:
             stats.datasets[dataset] = run_dataset(
-                session, dataset, force=args.force, max_retries=args.max_retries
+                session, dataset, cfg, force=args.force, max_retries=args.max_retries
             )
             any_ok = True
         except (FetchError, ParseError) as exc:
             logger.error("[%s] FAILED: %s", dataset, exc)
             stats.datasets[dataset] = {"error": str(exc), "passed": False}
-        if i < len(datasets) - 1:
+        if i < len(tasks) - 1:
             time.sleep(random.uniform(args.sleep_min, args.sleep_max))
 
     stats.finished_at = utc_now_iso()
