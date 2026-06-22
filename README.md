@@ -89,6 +89,39 @@ python scripts/generate_frontend_data.py        # rebuild the site data
 GitHub's *Add file → Upload files*. The deploy workflow imports it and rebuilds
 the site automatically. Download one CSV per week to grow the history.
 
+### Bulk-downloading old CSVs automatically
+
+Clicking *Download* week-by-week is tedious, so `scripts/fetch_spotify_csv.py`
+loops a date range for you. **It requires your own Spotify login** —
+charts.spotify.com has no public endpoint, and this tool uses *your* session
+rather than bypassing the login:
+
+```bash
+# Provide auth from an account you're entitled to use (one of these):
+export SPOTIFY_CHARTS_BEARER="<bearer token from your logged-in session>"
+export SPOTIFY_SP_DC="<sp_dc cookie from your browser>"
+
+# Download every weekly Global chart in a range (anchor --end-date to a KNOWN
+# weekly chart date; stepping goes back 7 days from there):
+python scripts/fetch_spotify_csv.py --chart regional-global-weekly \
+    --start-date 2022-01-01 --end-date 2026-06-18
+
+# Then normalize + rebuild:
+python scripts/import_spotify_csv.py && python scripts/generate_frontend_data.py
+```
+
+- Files save to `data/spotify_csv/` (resumable — existing files are skipped).
+- If the HTTP endpoint returns 401/403, run `scrape_spotify_global_200.py
+  --playwright-login` once, then add `--playwright` to drive your logged-in
+  browser instead.
+- Other charts work too: `regional-us-weekly`, `regional-global-daily`, etc.
+- **Legal/ethical:** obey Spotify's Terms, keep the randomized delays on, use
+  your own account, and don't bypass auth or anti-bot controls.
+
+> Note: this can't run from sandboxes/CI that block Spotify or lack your
+> credentials. Run it locally, then commit the resulting CSVs (or the generated
+> data) so the site picks them up.
+
 ## Frontend pages
 
 - **Dashboard** — total songs, date range, chart days, data gaps, top songs.

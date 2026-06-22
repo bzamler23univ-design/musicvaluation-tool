@@ -38,7 +38,8 @@ PROCESSED = PROJECT_ROOT / "data" / "processed"
 DEFAULT_DROP = PROJECT_ROOT / "data" / "spotify_csv"
 
 TRACK_ID_RE = re.compile(r"track[:/]([A-Za-z0-9]{22})")
-DATE8_RE = re.compile(r"(\d{8})")
+DATE_DASH_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+DATE8_RE = re.compile(r"(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)")
 
 CLEAN_COLUMNS = [
     "chart_date", "rank", "track_name", "artist_names", "streams",
@@ -50,13 +51,13 @@ CLEAN_COLUMNS = [
 def infer_date(path: Path, override: str | None) -> str:
     if override:
         return override
-    m = DATE8_RE.search(path.stem)
+    # Accept YYYY-MM-DD (dashed) or a bare YYYYMMDD run anywhere in the name.
+    m = DATE_DASH_RE.search(path.stem) or DATE8_RE.search(path.stem)
     if not m:
         raise SystemExit(
-            f"Could not find a YYYYMMDD date in '{path.name}'. Pass --date YYYY-MM-DD."
+            f"Could not find a date in '{path.name}'. Pass --date YYYY-MM-DD."
         )
-    d = m.group(1)
-    return f"{d[0:4]}-{d[4:6]}-{d[6:8]}"
+    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
 
 
 def infer_cadence(path: Path, override: str | None) -> str:
