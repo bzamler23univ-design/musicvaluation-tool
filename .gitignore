@@ -45,3 +45,7 @@ frontend/.vite/
 # Generated static data for the frontend (regenerate with generate_frontend_data.py)
 frontend/public/data/*
 !frontend/public/data/.gitkeep
+
+# Captured cURL (contains your private token) — never commit
+request.txt
+*.curl
