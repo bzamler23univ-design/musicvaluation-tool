@@ -164,42 +164,79 @@ def fetch_http(session: requests.Session, chart: str, d: date, max_retries: int)
     raise RuntimeError(f"exhausted retries: {last}")
 
 
-def fetch_playwright(chart: str, d: date) -> bytes:
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError as exc:
-        raise RuntimeError("playwright not installed (pip install playwright; "
-                           "playwright install chromium)") from exc
-    state = Path(PLAYWRIGHT_STATE)
-    if not state.exists():
-        raise PermissionError(
-            f"No saved login at {state}. Run: python scripts/scrape_spotify_global_200.py "
-            "--playwright-login"
-        )
-    url = PAGE_TEMPLATE.format(chart=chart, date=d.isoformat())
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        ctx = browser.new_context(storage_state=str(state), user_agent=USER_AGENT)
-        page = ctx.new_page()
+def _download_csv(page) -> bytes:
+    """Click the chart's 'Download data as CSV' control and return the bytes.
+    The control is an icon button, so we try several ways to find it."""
+    selectors = [
+        "[aria-label*='Download data as CSV' i]",
+        "button[aria-label*='Download' i]",
+        "[title*='Download data as CSV' i]",
+        "button[title*='Download' i]",
+        "a[download]",
+        "button:has-text('Download')",
+        "[data-testid='charts-download']",
+    ]
+    last_err: Optional[Exception] = None
+    for sel in selectors:
         try:
-            page.goto(url, wait_until="networkidle", timeout=60_000)
-            with page.expect_download(timeout=60_000) as dl:
-                clicked = False
-                for sel in ("button:has-text('Download')", "[data-testid='charts-download']", "a[download]"):
-                    loc = page.locator(sel)
-                    if loc.count() > 0:
-                        loc.first.click()
-                        clicked = True
-                        break
-                if not clicked:
-                    raise RuntimeError("no download control found on the page")
-            content = Path(dl.value.path()).read_bytes()
-        finally:
-            ctx.close()
-            browser.close()
-    if not looks_like_csv(content):
-        raise RuntimeError("Playwright download was not a CSV")
-    return content
+            loc = page.locator(sel)
+            if loc.count() == 0:
+                continue
+            with page.expect_download(timeout=30_000) as dl:
+                loc.first.click()
+            return Path(dl.value.path()).read_bytes()
+        except Exception as exc:  # noqa: BLE001 - try the next strategy
+            last_err = exc
+    # Last resort: any button whose accessible name mentions "download".
+    try:
+        btn = page.get_by_role("button", name=re.compile("download", re.I))
+        with page.expect_download(timeout=30_000) as dl:
+            btn.first.click()
+        return Path(dl.value.path()).read_bytes()
+    except Exception as exc:  # noqa: BLE001
+        last_err = exc
+    raise RuntimeError(f"could not find/trigger the CSV download control ({last_err})")
+
+
+class PlaywrightFetcher:
+    """Opens one logged-in headless browser and reuses it for every date."""
+
+    def __init__(self) -> None:
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError as exc:
+            raise RuntimeError(
+                "playwright not installed. Run: pip3 install playwright && "
+                "python3 -m playwright install chromium"
+            ) from exc
+        state = Path(PLAYWRIGHT_STATE)
+        if not state.exists():
+            raise PermissionError(
+                f"No saved login at {state}. Run: python3 scripts/scrape_spotify_global_200.py "
+                "--playwright-login"
+            )
+        self._pw = sync_playwright().start()
+        self.browser = self._pw.chromium.launch(headless=True)
+        self.ctx = self.browser.new_context(
+            storage_state=str(state), user_agent=USER_AGENT, accept_downloads=True
+        )
+        self.page = self.ctx.new_page()
+
+    def fetch(self, chart: str, d: date) -> bytes:
+        url = PAGE_TEMPLATE.format(chart=chart, date=d.isoformat())
+        self.page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+        self.page.wait_for_timeout(1500)  # let the chart + download button render
+        content = _download_csv(self.page)
+        if not looks_like_csv(content):
+            raise RuntimeError("downloaded file was not a CSV (login expired?)")
+        return content
+
+    def close(self) -> None:
+        for fn in (lambda: self.ctx.close(), lambda: self.browser.close(), self._pw.stop):
+            try:
+                fn()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def main() -> int:
@@ -236,33 +273,46 @@ def main() -> int:
             "Set SPOTIFY_CHARTS_BEARER / SPOTIFY_SP_DC, or use --playwright.")
 
     session = build_session()
+    pf: Optional[PlaywrightFetcher] = None
+    if args.playwright:
+        try:
+            pf = PlaywrightFetcher()
+        except (PermissionError, RuntimeError) as exc:
+            log(f"AUTH/SETUP ERROR: {exc}")
+            return 1
+
     fetched = skipped = failed = 0
     auth_failed = False
-    log(f"{cadence} '{args.chart}': {len(dates)} dates {dates[0]} → {dates[-1]}")
+    log(f"{cadence} '{args.chart}': {len(dates)} dates {dates[0]} → {dates[-1]}"
+        f"{' (browser mode)' if pf else ''}")
 
-    for i, d in enumerate(dates):
-        out = CSV_DIR / f"{args.chart}-{d.isoformat()}.csv"
-        if out.exists() and not args.force:
-            skipped += 1
-            continue
-        try:
-            content = (fetch_playwright(args.chart, d) if args.playwright
-                       else fetch_http(session, args.chart, d, args.max_retries))
-            out.write_bytes(content)
-            fetched += 1
-            log(f"[{d}] saved {out.name} ({len(content):,} bytes)")
-        except PermissionError as exc:
-            log(f"[{d}] AUTH ERROR: {exc}")
-            auth_failed = True
-            break  # token/login problem won't fix itself; stop early
-        except FileNotFoundError as exc:
-            log(f"[{d}] {exc}")
-            failed += 1
-        except Exception as exc:  # noqa: BLE001
-            log(f"[{d}] failed: {exc}")
-            failed += 1
-        if i < len(dates) - 1:
-            time.sleep(random.uniform(args.sleep_min, args.sleep_max))
+    try:
+        for i, d in enumerate(dates):
+            out = CSV_DIR / f"{args.chart}-{d.isoformat()}.csv"
+            if out.exists() and not args.force:
+                skipped += 1
+                continue
+            try:
+                content = (pf.fetch(args.chart, d) if pf
+                           else fetch_http(session, args.chart, d, args.max_retries))
+                out.write_bytes(content)
+                fetched += 1
+                log(f"[{d}] saved {out.name} ({len(content):,} bytes)")
+            except PermissionError as exc:
+                log(f"[{d}] AUTH ERROR: {exc}")
+                auth_failed = True
+                break  # token/login problem won't fix itself; stop early
+            except FileNotFoundError as exc:
+                log(f"[{d}] {exc}")
+                failed += 1
+            except Exception as exc:  # noqa: BLE001
+                log(f"[{d}] failed: {exc}")
+                failed += 1
+            if i < len(dates) - 1:
+                time.sleep(random.uniform(args.sleep_min, args.sleep_max))
+    finally:
+        if pf:
+            pf.close()
 
     log(f"Done. fetched={fetched} skipped={skipped} failed={failed}")
     if fetched:
