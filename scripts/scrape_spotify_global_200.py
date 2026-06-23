@@ -392,12 +392,21 @@ def playwright_login() -> None:
 
     page_url = CHART_PAGE_URL_TEMPLATE.format(date=date.today().isoformat())
     print(
-        "A browser window will open. Log into your Spotify account, wait until "
-        "the chart is visible, then return here and press Enter."
+        "A browser window will open on the Spotify Charts login.\n"
+        "  • Log in with your Spotify EMAIL + PASSWORD (NOT 'Continue with\n"
+        "    Google' — Google blocks automated browsers).\n"
+        "  • If you only ever used Google, set a password first at\n"
+        "    spotify.com → Log in → 'Forgot your password?'.\n"
+        "  • Once the chart is visible, come back here and press Enter."
     )
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        context = browser.new_context(user_agent=USER_AGENT)
+        # Prefer the user's real Chrome (better login compatibility); fall back
+        # to the bundled Chromium if Chrome isn't available.
+        try:
+            browser = p.chromium.launch(headless=False, channel="chrome")
+        except Exception:  # noqa: BLE001
+            browser = p.chromium.launch(headless=False)
+        context = browser.new_context(user_agent=USER_AGENT, accept_downloads=True)
         page = context.new_page()
         page.goto(page_url, wait_until="domcontentloaded")
         input("Press Enter once you are logged in and the chart is visible... ")
