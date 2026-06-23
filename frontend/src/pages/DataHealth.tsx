@@ -35,26 +35,32 @@ export default function DataHealthPage() {
       <div className="grid cols-2">
         <Card title={`Missing dates (${health.missing_dates.length})`}>
           {health.missing_dates.length === 0 ? (
-            <p className="muted">No gaps — every day in range is present. ✓</p>
+            <p className="muted">No gaps — every period in range is present. ✓</p>
           ) : (
             <div className="chips">
-              {health.missing_dates.map((d) => (
+              {health.missing_dates.slice(0, 60).map((d) => (
                 <span key={d} className="chip danger">{shortDate(d)}</span>
               ))}
+              {health.missing_dates.length > 60 && (
+                <span className="chip">+{health.missing_dates.length - 60} more</span>
+              )}
             </div>
           )}
         </Card>
 
         <Card title={`Partial dates (${health.partial_dates.length})`}>
           {health.partial_dates.length === 0 ? (
-            <p className="muted">Every charted day has a full 200 rows. ✓</p>
+            <p className="muted">Every charted period has a full 200 rows. ✓</p>
           ) : (
             <div className="chips">
-              {health.partial_dates.map((p) => (
+              {health.partial_dates.slice(0, 60).map((p) => (
                 <span key={p.chart_date} className="chip warn">
                   {shortDate(p.chart_date)} · {p.rows}
                 </span>
               ))}
+              {health.partial_dates.length > 60 && (
+                <span className="chip">+{health.partial_dates.length - 60} more</span>
+              )}
             </div>
           )}
         </Card>
