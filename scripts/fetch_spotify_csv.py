@@ -95,14 +95,23 @@ def looks_like_csv(content: bytes) -> bool:
     return b"," in first and (b"rank" in first or b"uri" in first or b"streams" in first)
 
 
-def weekly_dates(start: date, end: date) -> list[date]:
-    """Anchor to end-date and step back by 7 days (keeps alignment to the real
-    weekly chart day, whatever weekday Spotify uses)."""
-    out, cur = [], end
-    while cur >= start:
-        out.append(cur)
-        cur -= timedelta(days=7)
-    return list(reversed(out))
+# A known real Spotify weekly chart date (a Thursday). All weekly charts fall
+# on anchor + 7*k, so we can align any [start, end] window to real chart days
+# regardless of what weekday the caller passes.
+WEEKLY_ANCHOR = date(2016, 12, 29)
+
+
+def weekly_dates(start: date, end: date, anchor: date = WEEKLY_ANCHOR) -> list[date]:
+    """Every real weekly chart date (anchor + 7*k) within [start, end]."""
+    import math
+    k = math.ceil((start - anchor).days / 7)
+    cur = anchor + timedelta(days=7 * k)
+    out = []
+    while cur <= end:
+        if cur >= start:
+            out.append(cur)
+        cur += timedelta(days=7)
+    return out
 
 
 def daily_dates(start: date, end: date) -> list[date]:

@@ -122,6 +122,27 @@ python scripts/import_spotify_csv.py && python scripts/generate_frontend_data.py
 > credentials. Run it locally, then commit the resulting CSVs (or the generated
 > data) so the site picks them up.
 
+## Deploying & keeping it updated
+
+**Make it live (one-time):** Repo **Settings → Pages → Source → "GitHub
+Actions"**, then **Actions → "Daily update & deploy" → Run workflow**. Site URL:
+`https://<user>.github.io/musicvaluation-tool/`. After that the workflow
+redeploys daily and on every push to the branch.
+
+**Keeping the Spotify Weekly chart current** — two options:
+
+1. **Manual (no secrets, reliable):** each week, download the new
+   *Weekly · Global* CSV from charts.spotify.com, then in GitHub use
+   **Add file → Upload files** to drop it into `data/spotify_csv/`. The deploy
+   workflow imports it and rebuilds automatically.
+
+2. **Automated (opt-in):** add a repo secret **Settings → Secrets and
+   variables → Actions → New repository secret**, named `SPOTIFY_SP_DC` (your
+   long-lived `sp_dc` cookie) and/or `SPOTIFY_CHARTS_BEARER`. The daily workflow
+   then fetches the newest weekly CSV automatically, commits it, and redeploys.
+   Cookies/tokens can expire or rotate; if the step starts failing, refresh the
+   secret or fall back to manual upload. (No secret = step is skipped silently.)
+
 ## Frontend pages
 
 - **Dashboard** — total songs, date range, chart days, data gaps, top songs.

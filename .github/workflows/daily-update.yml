@@ -42,7 +42,26 @@ jobs:
             --datasets global-daily,songs,artists \
             --sleep-min 2 --sleep-max 5 --verbose
 
-      - name: Commit refreshed data (if the latest chart looks valid)
+      # OPTIONAL: auto-pull the newest Spotify weekly CSV. Only runs if you add a
+      # repo secret (Settings → Secrets and variables → Actions): SPOTIFY_SP_DC
+      # (your long-lived sp_dc cookie) and/or SPOTIFY_CHARTS_BEARER. Without a
+      # secret this is skipped and you upload CSVs manually instead.
+      - name: Fetch latest Spotify weekly CSV (optional)
+        continue-on-error: true
+        env:
+          SPOTIFY_SP_DC: ${{ secrets.SPOTIFY_SP_DC }}
+          SPOTIFY_CHARTS_BEARER: ${{ secrets.SPOTIFY_CHARTS_BEARER }}
+        run: |
+          if [ -z "$SPOTIFY_SP_DC" ] && [ -z "$SPOTIFY_CHARTS_BEARER" ]; then
+            echo "No Spotify auth secret set — skipping (upload CSVs manually instead)."
+            exit 0
+          fi
+          end=$(date -u +%F)
+          start=$(date -u -d '28 days ago' +%F)
+          python scripts/fetch_spotify_csv.py --chart regional-global-weekly \
+            --start-date "$start" --end-date "$end" --sleep-min 1 --sleep-max 3 || true
+
+      - name: Commit refreshed data (kworb if valid; any new Spotify CSVs)
         run: |
           python - <<'PY'
           import pathlib, pandas as pd
@@ -52,25 +71,27 @@ jobs:
               df = pd.read_csv(p)
               latest = df["chart_date"].max()
               n = int((df["chart_date"] == latest).sum())
-              print(f"latest={latest} rows={n} total={len(df)}")
+              print(f"kworb latest={latest} rows={n} total={len(df)}")
               ok = n >= 100
           pathlib.Path("_scrape_ok").write_text("1" if ok else "0")
           PY
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Always persist any newly fetched/uploaded Spotify weekly CSVs.
+          git add data/spotify_csv/*.csv 2>/dev/null || true
           if [ "$(cat _scrape_ok)" = "1" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
             git add data/processed/kworb_global_daily.csv \
                     data/processed/kworb_songs.csv \
                     data/processed/kworb_artists.csv \
                     data/processed/kworb_scrape_summary.json 2>/dev/null || true
-            if git diff --cached --quiet; then
-              echo "No data changes to commit."
-            else
-              git commit -m "data: daily kworb chart update"
-              git push
-            fi
           else
-            echo "::warning::Scrape produced no valid chart; keeping previous data."
+            echo "::warning::kworb scrape produced no valid chart; keeping previous kworb data."
+          fi
+          if git diff --cached --quiet; then
+            echo "No data changes to commit."
+          else
+            git commit -m "data: daily update (kworb + Spotify weekly)"
+            git push
           fi
           rm -f _scrape_ok
 
